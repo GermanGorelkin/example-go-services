@@ -1,0 +1,12 @@
+description: Заказ уже оплачен и не может быть отменён
+content:
+  application/json:
+    schema:
+      type: object
+      properties:
+        code:
+          type: string
+          example: "order_already_paid"
+        message:
+          type: string
+          example: "Заказ уже оплачен и не может быть отменён"

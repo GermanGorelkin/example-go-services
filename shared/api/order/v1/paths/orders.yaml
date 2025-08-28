@@ -1,0 +1,41 @@
+post:
+  summary: Создание заказа
+  description: Создаёт новый заказ на основе выбранных пользователем деталей.
+  operationId: createOrder
+  tags:
+    - orders
+  requestBody:
+    description: Тело запроса с идентификатором пользователя и списком деталей
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/create_order_request.yaml
+        example:
+          user_uuid: "user-123e4567-e89b-12d3-a456-426614174000"
+          part_uuids:
+            - "part-111e4567-e89b-12d3-a456-426614174001"
+            - "part-222e4567-e89b-12d3-a456-426614174002"
+  responses:
+    '201':
+      description: Заказ успешно создан
+      content:
+        application/json:
+          schema:
+            $ref: ../components/create_order_response.yaml
+          example:
+            order_uuid: "order-333e4567-e89b-12d3-a456-426614174003"
+            total_price: 123.45
+    '400':
+      description: Некорректный запрос (validation error)
+      content:
+        application/json:
+          schema:
+            $ref: ../components/errors/bad_request_error.yaml
+    '500':
+      description: Внутренняя ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: ../components/errors/internal_server_error.yaml
+

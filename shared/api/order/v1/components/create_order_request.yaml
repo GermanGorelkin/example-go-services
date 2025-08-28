@@ -1,0 +1,16 @@
+type: object
+required:
+  - user_uuid
+  - part_uuids
+properties:
+  user_uuid:
+    type: string
+    description: UUID пользователя, создающего заказ
+    example: "user-123e4567-e89b-12d3-a456-426614174000"
+  part_uuids:
+    type: array
+    description: Массив UUID выбранных деталей
+    items:
+      type: string
+      example: "part-111e4567-e89b-12d3-a456-426614174001"
+    minItems: 1
