@@ -15,7 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	orderV1 "github.com/germangorelkin/example-go-services/pkg/openapi/order/v1"
+	orderV1 "github.com/germangorelkin/example-go-services/shared/pkg/openapi/order/v1"
 )
 
 const (
