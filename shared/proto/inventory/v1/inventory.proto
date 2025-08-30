@@ -1,0 +1,153 @@
+syntax = "proto3";
+
+package inventory.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+option go_package = "github.com/germangorelkin/example-go-services/shared/pkg/proto/inventory/v1;inventoryV1";
+
+// Сервис управления инвентарём деталей космических кораблей.
+service InventoryService {
+  // Возвращает информацию о детали по её UUID.
+  rpc GetPart(GetPartRequest) returns (GetPartResponse);
+
+  // Возвращает список деталей с возможностью фильтрации.
+  rpc ListParts(ListPartsRequest) returns (ListPartsResponse);
+}
+
+// Ответ на запрос списка деталей
+message ListPartsResponse{
+    // Список деталей
+    repeated Part parts = 1;
+}
+
+// Запрос списка деталей с фильтрацией
+message ListPartsRequest{
+    // Фильтр для поиска деталей
+    PartsFilter filter = 1;
+}
+
+// Фильтр для поиска деталей
+message PartsFilter{
+    // Фильтр по UUID деталей
+    google.protobuf.StringValue uuids = 1;
+
+    // Фильтр по названиям деталей (частичное совпадение)
+    google.protobuf.StringValue names = 2;
+
+    // Фильтр по категориям деталей
+    google.protobuf.StringValue categories = 3;
+
+    // Фильтр по странам производителей
+    google.protobuf.StringValue manufacturer_countries = 4;
+
+    // Фильтр по тегам
+    google.protobuf.StringValue tags = 5;
+}
+
+// Запрос на получение детали по UUID
+message GetPartRequest{
+    // Уникальный идентификатор детали
+    string uuid = 1;
+}
+
+// Ответ на запрос детали
+message GetPartResponse{
+    // Деталь
+    Part part = 1;
+}
+
+// Деталь космического корабля
+message Part{
+    // Уникальный идентификатор детали 
+    string uuid = 1;
+
+    // Название детали
+    string name = 2;
+
+    // Описание детали 
+    string description = 3;
+
+    //  Цена за единицу
+    double price = 4;
+
+    // Количество на складе
+    int64 stock_quantity = 5;
+
+    // Категория детали
+    Category category = 6;
+
+    // Размеры детали
+    Dimensions dimensions = 7;
+
+    // Информация о производителе
+    Manufacturer manufacturer = 8;
+
+    // Теги для быстрого поиска
+    repeated string tags = 9;
+
+    // Гибкие метаданные
+    map<string, Value> metadata = 10;
+
+    // Дата создания
+    google.protobuf.Timestamp created_at = 11;
+
+    // Дата обновления
+    google.protobuf.Timestamp updated_at = 12;
+}
+
+// Гибкое значение для метаданных
+message Value {
+  oneof value {
+    string string_value = 1;
+    int64 int64_value = 2;
+    double double_value = 3;
+    bool bool_value = 4;
+  }
+}
+
+// Категория
+enum Category{
+    // Неизвестная категория
+    CATEGORY_UNSPECIFIED = 0;
+
+    // Двигатель
+    CATEGORY_ENGINE = 1;
+
+    // Топливо
+    CATEGORY_FUEL = 2;
+
+    // Иллюминатор
+    CATEGORY_PORTHOLE = 3;
+
+    // Крыло
+    CATEGORY_WING = 4;
+}
+
+// Информация о производителе 
+message Manufacturer{
+    // Название
+    string name = 1;
+
+    // Страна производства
+    string country = 2;
+
+    // Сайт производителя
+    string website =3;
+}
+
+// Размеры детали   
+message Dimensions{
+    // Длина в см
+    double length = 1;
+
+    // Ширина в см
+    double width = 2;
+
+    // Высота в см
+    double height = 3;
+
+    // Вес в кг
+    double weight = 4;
+}
