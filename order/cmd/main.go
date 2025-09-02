@@ -14,9 +14,16 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	orderV1 "github.com/germangorelkin/example-go-services/shared/pkg/openapi/order/v1"
+	inventoryV1 "github.com/germangorelkin/example-go-services/shared/pkg/proto/inventory/v1"
+	paymentV1 "github.com/germangorelkin/example-go-services/shared/pkg/proto/payment/v1"
 )
+
+var ErrOrderNotFound = errors.New("order not found")
 
 const (
 	httpPort = "9090"
@@ -25,31 +32,86 @@ const (
 	shutdownTimeout   = 10 * time.Second
 )
 
-// OrderStorage представляет потокобезопасное хранилище данных о погоде
+type Order struct {
+	OrderUUID       string   `json:"order_uuid"`
+	UserUUID        string   `json:"user_uuid"`
+	PartUuids       []string `json:"part_uuids"`
+	TotalPrice      float64  `json:"total_price"`
+	TransactionUUID *string  `json:"transaction_uuid"`
+	PaymentMethod   *string  `json:"payment_method"`
+	Status          string   `json:"status"`
+}
+
+// OrderStorage представляет потокобезопасное хранилище данных о заказах
 type OrderStorage struct {
-	mu sync.RWMutex
+	mu   sync.RWMutex
+	data map[string]Order
 }
 
-// NewWeatherStorage создает новое хранилище данных о погоде
+// NewOrderStorage создает новое хранилище данных о заказах
 func NewOrderStorage() *OrderStorage {
-	return &OrderStorage{}
+	return &OrderStorage{
+		data: make(map[string]Order),
+	}
 }
 
-// CreateOrder создает новый заказ на основе выбранных пользователем деталей
-func (s *OrderStorage) CreateOrder() {
+// Get
+func (s *OrderStorage) Get(uuid string) (Order, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
+	order, exists := s.data[uuid]
+	if !exists {
+		return order, ErrOrderNotFound
+	}
+	return order, nil
 }
 
-// WeatherHandler реализует интерфейс weatherV1.Handler для обработки запросов к API погоды
+// Set
+func (s *OrderStorage) Set(order Order) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data[order.OrderUUID] = order
+}
+
+// OrderHandler реализует интерфейс orderV1.Handler для обработки запросов к API погоды
 type OrderHandler struct {
-	storage *OrderStorage
+	storage           *OrderStorage
+	inventroryService inventoryV1.InventoryServiceClient
+	paymentService    paymentV1.PaymentServiceClient
 }
 
-// NewWeatherHandler создает новый обработчик запросов к API погоды
+// NewOrderHandler создает новый обработчик запросов к API
 func NewOrderHandler(storage *OrderStorage) *OrderHandler {
 	return &OrderHandler{
-		storage: storage,
+		storage:           storage,
+		inventroryService: newInventoryService(),
+		paymentService:    newPaymentService(),
 	}
+}
+
+func newInventoryService() inventoryV1.InventoryServiceClient {
+	conn, err := grpc.NewClient(
+		"localhost:50051",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		log.Panicf("failed to connect: %v\n", err)
+	}
+
+	return inventoryV1.NewInventoryServiceClient(conn)
+}
+
+func newPaymentService() paymentV1.PaymentServiceClient {
+	conn, err := grpc.NewClient(
+		"localhost:50052",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		log.Panicf("failed to connect: %v\n", err)
+	}
+
+	return paymentV1.NewPaymentServiceClient(conn)
 }
 
 // CreateOrder обрабатывает запрос на создание нового заказа
@@ -63,34 +125,109 @@ func (h *OrderHandler) CreateOrder(ctx context.Context, req *orderV1.CreateOrder
 	}
 
 	// Создание заказа в хранилище
-	h.storage.CreateOrder()
+	order := Order{
+		OrderUUID: uuid.NewString(),
+		UserUUID:  req.UserUUID,
+		PartUuids: append([]string{}, req.PartUuids...),
+		Status:    "PENDING_PAYMENT",
+	}
 
-	// Возвращаем успешный ответ (пустой в данном случае)
-	return &orderV1.CreateOrderResponse{}, nil
+	// вызов inventory
+	parts, err := h.inventroryService.ListParts(context.Background(), &inventoryV1.ListPartsRequest{
+		Filter: &inventoryV1.PartsFilter{
+			Uuids: order.PartUuids,
+		},
+	})
+	if err != nil {
+		log.Printf("failed to ListParts:%v", err)
+		return &orderV1.InternalServerError{}, nil
+	}
+	// check parts
+	if len(parts.Parts) != len(order.PartUuids) {
+		return &orderV1.BadRequestError{}, nil
+	}
+
+	// calc total price
+	for _, part := range parts.GetParts() {
+		order.TotalPrice += part.Price
+	}
+
+	// save
+	h.storage.Set(order)
+
+	// Возвращаем успешный ответ
+	return &orderV1.CreateOrderResponse{
+		OrderUUID:  order.OrderUUID,
+		TotalPrice: order.TotalPrice,
+	}, nil
 }
 
 // Проводит оплату ранее созданного заказа.
 func (h *OrderHandler) PayOrder(ctx context.Context, req *orderV1.PayOrderRequest, params orderV1.PayOrderParams) (orderV1.PayOrderRes, error) {
-	// Логика проведения оплаты заказа в хранилище
-	// ...
+	order, err := h.storage.Get(params.OrderUUID)
+	if err != nil {
+		return &orderV1.NotFoundError{}, nil
+	}
+
+	// вызов payment
+	payment := &paymentV1.PayOrderRequest{
+		OrderUuid:     order.OrderUUID,
+		UserUuid:      order.UserUUID,
+		PaymentMethod: 1,
+	}
+	tx, err := h.paymentService.PayOrder(context.Background(), payment)
+	if err != nil {
+		log.Printf("failed to PayOrder:%v", err)
+		return &orderV1.InternalServerError{}, nil
+	}
+
+	// set payment info
+	paymentMethod := "1"
+	order.TransactionUUID = &tx.TransactionUuid
+	order.PaymentMethod = &paymentMethod
+	order.Status = "PAID"
+
+	// update order
+	h.storage.Set(order)
 
 	// Возвращаем успешный ответ (пустой в данном случае)
-	return &orderV1.PayOrderResponse{}, nil
+	return &orderV1.PayOrderResponse{TransactionUUID: *order.TransactionUUID}, nil
 }
 
 func (h *OrderHandler) GetOrderByUuid(ctx context.Context, params orderV1.GetOrderByUuidParams) (orderV1.GetOrderByUuidRes, error) {
-	// Логика получения информации о заказе из хранилища
-	// ...
+	order, err := h.storage.Get(params.OrderUUID)
+	if err != nil {
+		return &orderV1.NotFoundError{}, nil
+	}
 
-	// Возвращаем успешный ответ (пустой в данном случае)
-	return &orderV1.GetOrderResponse{}, nil
+	return &orderV1.GetOrderResponse{
+		OrderUUID:       uuid.MustParse(order.OrderUUID),
+		UserUUID:        uuid.MustParse(order.UserUUID),
+		PartUuids:       []uuid.UUID{},
+		TotalPrice:      0,
+		TransactionUUID: orderV1.NewOptNilUUID(uuid.MustParse(*order.TransactionUUID)),
+		PaymentMethod:   orderV1.NewOptNilGetOrderResponsePaymentMethod(orderV1.GetOrderResponsePaymentMethodCARD),
+		Status:          "",
+	}, nil
 }
 
 func (h *OrderHandler) CancelOrder(ctx context.Context, params orderV1.CancelOrderParams) (orderV1.CancelOrderRes, error) {
-	// Логика отмены заказа в хранилище
-	// ...
+	order, err := h.storage.Get(params.OrderUUID)
+	if err != nil {
+		return &orderV1.NotFoundError{}, nil
+	}
 
-	// Возвращаем успешный ответ (пустой в данном случае)
+	// заказ уже оплачен и не может быть отменён
+	if order.Status == "PAID" {
+		return &orderV1.ConflictError{}, nil
+	}
+
+	// change status
+	order.Status = "CANCELLED"
+
+	// save order
+	h.storage.Set(order)
+
 	return &orderV1.CancelOrderNoContent{}, nil
 }
 
@@ -102,7 +239,7 @@ func main() {
 	orderHandler := NewOrderHandler(storage)
 
 	// Создаем OpenAPI сервер
-	weatherServer, err := orderV1.NewServer(orderHandler)
+	orderServer, err := orderV1.NewServer(orderHandler)
 	if err != nil {
 		log.Fatalf("ошибка создания сервера OpenAPI: %v", err)
 	}
@@ -116,7 +253,7 @@ func main() {
 	r.Use(middleware.Timeout(10 * time.Second))
 
 	// Монтируем обработчики OpenAPI
-	r.Mount("/", weatherServer)
+	r.Mount("/", orderServer)
 
 	// Запускаем HTTP-сервер
 	server := &http.Server{

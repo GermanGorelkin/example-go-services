@@ -20,9 +20,7 @@ import (
 	inventoryV1 "github.com/germangorelkin/example-go-services/shared/pkg/proto/inventory/v1"
 )
 
-var (
-	ErrPartNotFound = errors.New("part not found")
-)
+var ErrPartNotFound = errors.New("part not found")
 
 const grpcPort = 50051
 
