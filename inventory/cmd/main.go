@@ -2,139 +2,152 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"slices"
+	"sync"
 	"syscall"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 
 	inventoryV1 "github.com/germangorelkin/example-go-services/shared/pkg/proto/inventory/v1"
 )
 
+var (
+	ErrPartNotFound = errors.New("part not found")
+)
+
 const grpcPort = 50051
 
-// inventoryService реализует методы сервиса InventoryService
-type inventoryService struct {
+// InventoryStorage представляет потокобезопасное хранилище данных о деталях
+type InventoryStorage struct {
+	mu   sync.RWMutex
+	data map[string]*inventoryV1.Part
+}
+
+func NewInventoryStorage() *InventoryStorage {
+	return &InventoryStorage{
+		data: make(map[string]*inventoryV1.Part),
+	}
+}
+
+func (s *InventoryStorage) Get(uid string) (*inventoryV1.Part, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	p, ok := s.data[uid]
+	if !ok {
+		return p, ErrPartNotFound
+	}
+	return p, nil
+}
+
+func (s *InventoryStorage) Set(part *inventoryV1.Part) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.data[part.Uuid] = part
+}
+
+func (s *InventoryStorage) Filters(filters *inventoryV1.PartsFilter) []*inventoryV1.Part {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	parts := make([]*inventoryV1.Part, 0)
+
+	for _, part := range s.data {
+		// uuid
+		if len(filters.Uuids) > 0 {
+			found := slices.Contains(filters.Uuids, part.Uuid)
+			if !found {
+				break
+			}
+		}
+
+		// name
+		if len(filters.Names) > 0 {
+			found := slices.Contains(filters.Names, part.Name)
+			if !found {
+				break
+			}
+		}
+
+		// categories
+		if len(filters.Categories) > 0 {
+			found := slices.Contains(filters.Categories, part.Category.String())
+			if !found {
+				break
+			}
+		}
+
+		// manufacturer_countries
+		if len(filters.ManufacturerCountries) > 0 {
+			found := slices.Contains(filters.ManufacturerCountries, part.Manufacturer.Country)
+			if !found {
+				break
+			}
+		}
+
+		// tags
+		if len(filters.Tags) > 0 {
+			found := false
+			for _, tag := range filters.Tags {
+				if slices.Contains(part.Tags, tag) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				break
+			}
+		}
+
+		parts = append(parts, part)
+	}
+
+	return parts
+}
+
+// InventoryService реализует методы сервиса InventoryService
+type InventoryService struct {
+	storage *InventoryStorage
+
 	inventoryV1.UnimplementedInventoryServiceServer
 }
 
-func (s *inventoryService) GetPart(_ context.Context, req *inventoryV1.GetPartRequest) (*inventoryV1.GetPartResponse, error) {
-	part := &inventoryV1.Part{}
-
-	return &inventoryV1.GetPartResponse{
-		Part: part,
-	}, nil
+func NewInventoryService() *InventoryService {
+	return &InventoryService{
+		storage: NewInventoryStorage(),
+	}
 }
 
-func (s *inventoryService) ListParts(_ context.Context, req *inventoryV1.ListPartsRequest) (*inventoryV1.ListPartsResponse, error) {
-	parts := []*inventoryV1.Part{}
+func (s *InventoryService) GetPart(_ context.Context, req *inventoryV1.GetPartRequest) (*inventoryV1.GetPartResponse, error) {
+	partUUID := req.GetUuid()
+
+	part, err := s.storage.Get(partUUID)
+	if err != nil {
+		if errors.Is(ErrPartNotFound, err) {
+			return nil, status.Errorf(codes.NotFound, "part with UUID %s not found", partUUID)
+		}
+	}
+
+	return &inventoryV1.GetPartResponse{Part: part}, nil
+}
+
+func (s *InventoryService) ListParts(_ context.Context, req *inventoryV1.ListPartsRequest) (*inventoryV1.ListPartsResponse, error) {
+	parts := s.storage.Filters(req.GetFilter())
 
 	return &inventoryV1.ListPartsResponse{
 		Parts: parts,
 	}, nil
 }
-
-// Create создает новое наблюдение НЛО
-// func (s *ufoService) Create(_ context.Context, req *ufoV1.CreateRequest) (*ufoV1.CreateResponse, error) {
-// 	s.mu.Lock()
-// 	defer s.mu.Unlock()
-
-// 	// Генерируем UUID для нового наблюдения
-// 	newUUID := uuid.NewString()
-
-// 	sighting := &ufoV1.Sighting{
-// 		Uuid:      newUUID,
-// 		Info:      req.GetInfo(),
-// 		CreatedAt: timestamppb.New(time.Now()),
-// 	}
-
-// 	s.sightings[newUUID] = sighting
-
-// 	log.Printf("Создано наблюдение с UUID %s", newUUID)
-
-// 	return &ufoV1.CreateResponse{
-// 		Uuid: newUUID,
-// 	}, nil
-// }
-
-// // Get возвращает наблюдение НЛО по UUID
-// func (s *ufoService) Get(_ context.Context, req *ufoV1.GetRequest) (*ufoV1.GetResponse, error) {
-// 	s.mu.RLock()
-// 	defer s.mu.RUnlock()
-
-// 	sighting, ok := s.sightings[req.GetUuid()]
-// 	if !ok {
-// 		return nil, status.Errorf(codes.NotFound, "sighting with UUID %s not found", req.GetUuid())
-// 	}
-
-// 	return &ufoV1.GetResponse{
-// 		Sighting: sighting,
-// 	}, nil
-// }
-
-// // Update обновляет существующее наблюдение НЛО
-// func (s *ufoService) Update(_ context.Context, req *ufoV1.UpdateRequest) (*emptypb.Empty, error) {
-// 	s.mu.Lock()
-// 	defer s.mu.Unlock()
-
-// 	sighting, ok := s.sightings[req.GetUuid()]
-// 	if !ok {
-// 		return nil, status.Errorf(codes.NotFound, "sighting with UUID %s not found", req.GetUuid())
-// 	}
-
-// 	if req.UpdateInfo == nil {
-// 		return nil, status.Error(codes.InvalidArgument, "update_info cannot be nil")
-// 	}
-
-// 	// Обновляем поля, только если они были установлены в запросе
-// 	if req.GetUpdateInfo().ObservedAt != nil {
-// 		sighting.Info.ObservedAt = req.GetUpdateInfo().ObservedAt
-// 	}
-
-// 	if req.GetUpdateInfo().Location != nil {
-// 		sighting.Info.Location = req.GetUpdateInfo().Location.Value
-// 	}
-
-// 	if req.GetUpdateInfo().Description != nil {
-// 		sighting.Info.Description = req.GetUpdateInfo().Description.Value
-// 	}
-
-// 	if req.GetUpdateInfo().Color != nil {
-// 		sighting.Info.Color = req.GetUpdateInfo().Color
-// 	}
-
-// 	if req.GetUpdateInfo().Sound != nil {
-// 		sighting.Info.Sound = req.GetUpdateInfo().Sound
-// 	}
-
-// 	if req.GetUpdateInfo().DurationSeconds != nil {
-// 		sighting.Info.DurationSeconds = req.GetUpdateInfo().DurationSeconds
-// 	}
-
-// 	sighting.UpdatedAt = timestamppb.New(time.Now())
-
-// 	return &emptypb.Empty{}, nil
-// }
-
-// // Delete удаляет наблюдение НЛО (мягкое удаление - устанавливает deleted_at)
-// func (s *ufoService) Delete(_ context.Context, req *ufoV1.DeleteRequest) (*emptypb.Empty, error) {
-// 	s.mu.Lock()
-// 	defer s.mu.Unlock()
-
-// 	sighting, ok := s.sightings[req.GetUuid()]
-// 	if !ok {
-// 		return nil, status.Errorf(codes.NotFound, "sighting with UUID %s not found", req.GetUuid())
-// 	}
-
-// 	// Мягкое удаление - устанавливаем deleted_at
-// 	sighting.DeletedAt = timestamppb.New(time.Now())
-
-// 	return &emptypb.Empty{}, nil
-// }
 
 func main() {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", grpcPort))
@@ -152,7 +165,7 @@ func main() {
 	s := grpc.NewServer()
 
 	// Регистрируем наш сервис
-	service := &inventoryService{}
+	service := NewInventoryService()
 
 	inventoryV1.RegisterInventoryServiceServer(s, service)
 

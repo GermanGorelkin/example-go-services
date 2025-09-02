@@ -3,7 +3,6 @@ syntax = "proto3";
 package inventory.v1;
 
 import "google/protobuf/timestamp.proto";
-import "google/protobuf/wrappers.proto";
 
 option go_package = "github.com/germangorelkin/example-go-services/shared/pkg/proto/inventory/v1;inventoryV1";
 
@@ -31,19 +30,19 @@ message ListPartsRequest{
 // Фильтр для поиска деталей
 message PartsFilter{
     // Фильтр по UUID деталей
-    google.protobuf.StringValue uuids = 1;
+    repeated string uuids = 1;
 
     // Фильтр по названиям деталей (частичное совпадение)
-    google.protobuf.StringValue names = 2;
+    repeated string names = 2;
 
     // Фильтр по категориям деталей
-    google.protobuf.StringValue categories = 3;
+    repeated string categories = 3;
 
     // Фильтр по странам производителей
-    google.protobuf.StringValue manufacturer_countries = 4;
+    repeated string manufacturer_countries = 4;
 
     // Фильтр по тегам
-    google.protobuf.StringValue tags = 5;
+    repeated string tags = 5;
 }
 
 // Запрос на получение детали по UUID
