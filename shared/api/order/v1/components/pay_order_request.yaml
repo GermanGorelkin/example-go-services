@@ -1,0 +1,9 @@
+type: object
+required:
+  - payment_method
+properties:
+  payment_method:
+    type: string
+    description: Способ оплаты
+    enum: [CARD, PAYPAL, APPLE_PAY, GOOGLE_PAY]
+    example: CARD

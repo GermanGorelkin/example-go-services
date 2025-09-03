@@ -1,0 +1,7 @@
+name: order_uuid
+in: path
+required: true
+description: UUID заказа, который нужно оплатить
+schema:
+  type: string
+  example: "order-333e4567-e89b-12d3-a456-426614174003"

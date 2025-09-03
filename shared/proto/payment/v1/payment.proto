@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package payment.v1;
+
+option go_package = "github.com/germangorelkin/example-go-services/shared/pkg/proto/payment/v1;paymentV1";
+
+service PaymentService{
+    rpc PayOrder(PayOrderRequest) returns (PayOrderResponse);
+}
+
+// Запрос PayOrder
+message PayOrderRequest{
+    // UUID заказа 
+    string order_uuid = 1;
+
+    // UUID пользователя, который инициирует оплату
+    string user_uuid = 2;
+
+    // Выбранный способ оплаты  
+    PaymentMethod payment_method = 3;
+}
+
+// Выбранный способ оплаты  
+enum PaymentMethod{
+    // Неизвестный способ
+    PAYMENT_METHOD_UNSPECIFIED = 0;
+
+    // Банковская карта
+    PAYMENT_METHOD_CARD = 1;
+
+    // Система быстрых платежей
+    PAYMENT_METHOD_SBP = 2;
+
+    // Кредитная карта
+    PAYMENT_METHOD_CREDIT_CARD = 3;
+
+    // Деньги инвестора (внутренний метод)
+    PAYMENT_METHOD_INVESTOR_MONEY = 4;
+}
+
+// Ответ PayOrder
+message PayOrderResponse{
+    // UUID транзакции оплаты
+    string transaction_uuid = 1;
+}

@@ -1,0 +1,45 @@
+post:
+  summary: Оплата заказа
+  description: Проводит оплату ранее созданного заказа.
+  operationId: payOrder
+  tags:
+    - orders
+  parameters:
+    - $ref: '../params/order_uuid.yaml'
+  requestBody:
+    description: Данные для оплаты заказа
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../components/pay_order_request.yaml
+        example:
+          payment_method: "CARD"
+  responses:
+    '200':
+      description: Оплата прошла успешно]
+      content:
+        application/json:
+          schema:
+            $ref: ../components/pay_order_response.yaml
+          example:
+            transaction_uuid: "txn-444e4567-e89b-12d3-a456-426614174004"
+    '400':
+      description: Ошибка запроса (например, неверный способ оплаты)
+      content:
+        application/json:
+          schema:
+            $ref: ../components/errors/bad_request_error.yaml
+    '404':
+      description: Заказ не найден
+      content:
+        application/json:
+          schema:
+            $ref: ../components/errors/not_found_error.yaml
+    '500':
+      description: Внутренняя ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: ../components/errors/internal_server_error.yaml
+
